@@ -1,0 +1,277 @@
+
+<input multiple type="file" id="file" name="file">
+<input type='text' id='resolutions' />
+<input type='number' id='quality' />
+<input type='number' id='locationId' />
+<input type='number' id='pageId' />
+<input type='number' id='PORT' />
+
+<button id='generate'>generate</button>
+
+<button id='save'>save</button>
+
+<div id='app' style='display: flex; flex-wrap: wrap'></div>
+
+<script src='https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.js'></script>
+<script src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.6.0/jszip.js'></script>
+
+<script>
+
+function buildDownMapping(size) {
+    const n = size/512
+
+    const obj = {}
+
+    for(let x = 0; x < n; x++) {
+        for(let y = 0; y < n; y++) {
+            obj[`${x}-${y}`] = `${y}-${n-x-1}`
+        }
+    }
+
+    return obj
+}
+
+function buildUpMapping(size) {
+    const n = size/512
+
+    const obj = {}
+
+    for(let x = 0; x < n; x++) {
+        for(let y = 0; y < n; y++) {
+            obj[`${x}-${y}`] = `${n-y-1}-${x}`
+        }
+    }
+
+    return obj
+}
+
+const splitEvery = (arr, size) =>
+  arr
+    .reduce((acc, _, i) =>
+      (i % size)
+        ? acc
+        : [...acc, arr.slice(i, i + size)]
+    , [])
+
+
+window.zip = new JSZip()
+
+window.FILES = []
+
+const sidesMap = {
+    u: 'cubeup',
+    d: 'cubedown',
+    l: 'cubeleft',
+    r: 'cuberight',
+    f: 'cubefront',
+    b: 'cubeback'
+}
+
+document.querySelector('#save').addEventListener('click', () => {
+    zip.generateAsync({type:"blob"}).then(blob => {
+        saveAs(blob, "cube.zip");
+    })
+})
+
+document.querySelector('#generate').addEventListener('click', async () => {
+    const files = Array.from(document.querySelector('#file').files)
+
+    const locationId = parseInt(document.querySelector('#locationId').value)
+    const PORT = parseInt(document.querySelector('#PORT').value)
+    const pageId = parseInt(document.querySelector('#pageId').value)
+    const quality = parseInt(document.querySelector('#quality').value)
+    const resolutions = document.querySelector('#resolutions').value.split(',').map(Number)
+
+    let idx = 0
+
+    let promises = []
+
+    console.time('generate')
+
+    for(const file of files) {
+        const fileData = {
+            width: 2048,
+            height: 4096,
+            file
+        }
+
+        const point = file.name.split('.')[0].split('eq_')[1]
+
+        // promises.push(getFileCubes(fileData, point, {resolutions: [512]}))
+        // const cubes = await getFileCubes(fileData, point, {resolutions, quality})
+        // window.onEquiGenerate(cubes)
+
+        const cubes = await getFileCubes(fileData, point, {resolutions, quality})
+        promises.push(cubes)
+        window.onequigenerate(locationId)
+
+        // await fetch(`http://localhost:${PORT}/generated-cubes-chunk`, {
+        //     method: 'POST',
+        //     headers: {
+        //         'content-type': 'application/json',
+        //     },
+        //     body: JSON.stringify(cubes)
+        // })
+
+        for(const cube of cubes) {
+            window.onnewcube({locationId, cube})
+        }
+        // window.newcubeschunk({
+        //     locationId,
+        //     cubes
+        // })
+    }
+
+    const complete = {
+        pageId,
+        locationId,
+        quality,
+        resolutions,
+        cubes: []
+        // cubes: await Promise.all(promises).then(lists => lists.flat(1))
+    }
+
+    // await fetch(`http://localhost:${PORT}/generated-cubes`, {
+    //     method: 'POST',
+    //     headers: {
+    //         'content-type': 'application/json',
+    //     },
+    //     body: JSON.stringify(await Promise.all(promises).then(lists => lists.flat(1)))
+    // })
+
+    window.oncomplete(complete)
+
+    // await Promise.all(promises).then(lists => lists.flat(1)).then(list => console.log({list}))
+
+    /*
+    await Promise.all(promises).then(lists => lists.flat(1)).then(list => {
+        list.forEach(({name, tileArray, isBase64 = false}) => {
+            if(isBase64) {
+                FILES.push({type: 'base64', value: tileArray.split('base64,')[1]})
+                // zip.file(`${name}.jpg`, tileArray.split('base64,')[1], {base64: true})
+            } else {
+                FILES.push({type: 'base64', value: btoa(String.fromCharCode(...new Uint8Array(tileArray.buffer)))})
+                // FILES.push({type: 'binary', value: tileArray.buffer})
+
+                // zip.file(`${name}.jpg`, tileArray)
+            }
+        })
+    })
+    */
+
+    console.timeEnd('generate')
+
+    // console.log('ok')
+})
+
+async function getFileCubes(fileData, point, {resolutions = [512], quality = 85} = {}) {
+    return new Promise(rs => {
+        const sidesMap = {
+            u: 'cubeup',
+            d: 'cubedown',
+            l: 'cubeleft',
+            r: 'cuberight',
+            f: 'cubefront',
+            b: 'cubeback'
+        }
+
+        const rotates = {
+            d: -Math.PI/2,
+            u: Math.PI/2
+        }
+    
+        const worker = new Worker('./js/equirect.worker.js')
+
+        worker.addEventListener('error', console.error)
+
+        const cubes = []
+
+        const rotateCube = function(cube) {
+            return new Promise(rs => {
+                const canvas = document.createElement('canvas')
+                canvas.width = 512
+                canvas.height = 512
+                const ctx = canvas.getContext('2d')
+
+                const img = new Image()
+                img.width = 512
+                img.height = 512
+                img.src = URL.createObjectURL(
+                    new Blob([cube.tileArray.buffer], { type: 'image/jpg' })
+                )
+
+                img.onload = () => {
+                    ctx.translate(canvas.width / 2,canvas.height / 2);
+
+                    ctx.rotate(rotates[cube.face]);
+                    ctx.drawImage(img, -img.width / 2, -img.height / 2, 512, 512);
+
+                    const cubeIdx = cubes.findIndex(c => c.name === cube.name)
+
+                    cubes[cubeIdx].isBase64 = true
+                    cubes[cubeIdx].tileArray = canvas.toDataURL('image/jpeg')
+
+                    // cubes[cubeIdx].tileArray = new Uint8Array(ctx.getImageData(0, 0, 512, 512).data.buffer)
+
+                    rs()
+                }
+            })
+        }
+
+        worker.addEventListener('message', async e => {
+            if(e.data.msg === 'tile') {
+                const {face, level: {size}, h, v} = e.data
+
+                let side = `${h}-${v}`
+
+                if(face === 'u') {
+                    side = buildUpMapping(size)[side]
+                } else if(face === 'd') {
+                    side = buildDownMapping(size)[side]
+                }
+
+                let name = `${point}_${sidesMap[face]}_${(Math.log2(size) - Math.log2(512))}-${side}`
+
+                cubes.push({
+                    name,
+                    tileArray: e.data.tileArray,
+                    face
+                })
+
+                // window.onNewTile({
+                //     type: 'newtile',
+                //     detail: {
+                //         name,
+                //         tileArray: e.data.tileArray,
+                //         face
+                //     }
+                // })
+            }
+
+            if(e.data.msg === 'done') {
+                const chunks = splitEvery(cubes.filter(c => rotates[c.face]), 5)
+
+                for(const chunk of chunks) {
+                    for(const cube of chunk) {
+                        await rotateCube(cube)
+                    }
+
+                    await new Promise(rs => setTimeout(rs, 100))
+                }
+
+                rs(cubes)
+            }
+        })
+
+        worker.postMessage({
+            cubeMapPreviewSize: 256,
+            cubeMapPreviewFaceOrder: 'bdflru',
+            levels: resolutions.map(size => ({tileSize: 512, size})),
+            fileData,
+            quality
+        })
+
+    })
+}
+
+</script>
