@@ -261,6 +261,12 @@ async function getFileCubes(fileData, point, {resolutions = [512], quality = 85}
 
                 rs(cubes)
             }
+
+            if(e.data.msg === 'faceImageData') {
+                const img = imagedata_to_image(new ImageData(e.data.faceImageData.data, e.data.faceImageData.width, e.data.faceImageData.height))
+
+                // document.body.appendChild(img)
+            }
         })
 
         worker.postMessage({
@@ -272,6 +278,18 @@ async function getFileCubes(fileData, point, {resolutions = [512], quality = 85}
         })
 
     })
+}
+
+function imagedata_to_image(imagedata) {
+    var canvas = document.createElement('canvas');
+    var ctx = canvas.getContext('2d');
+    canvas.width = imagedata.width;
+    canvas.height = imagedata.height;
+    ctx.putImageData(imagedata, 0, 0);
+
+    var image = new Image();
+    image.src = canvas.toDataURL();
+    return image;
 }
 
 </script>

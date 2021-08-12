@@ -439,13 +439,20 @@ server.get('/jobs/stats', (req: Request, res: Response) => {
     if(!req.query.location) return res.status(500).end('Location is requred')
     const locationId = parseInt(req.query.location as string)
 
+    const equiGenerationQueue = equiGenerationQueue$.getState()
+
     res.json({
         active: (
             (generationStats$.getState()[locationId] || 0) +
-            equiGenerationQueue$.getState()
+            equiGenerationQueue
                 .filter(x => x.locationId === locationId)
                 .reduce((acc, {files}) => acc + files.length, 0)
-        )
+        ),
+        beforeLocation: equiGenerationQueue.reduce(({value, skip}, x) => {
+            if(x.locationId === locationId || skip) return {value, skip: true}
+
+            return {skip, value: value + x.files.length}
+        }, {value: 0, skip: false}).value
     })
 })
 
@@ -461,9 +468,9 @@ sample({
         const zip = new JSZip()
         cubes.forEach((cube: any) => {
             if(cube.isBase64) {
-                zip.file(`${cube.name}.jpg`, cube.tileArray.split('base64,')[1], {base64: true})
+                zip.file(`cube/${cube.name}.jpg`, cube.tileArray.split('base64,')[1], {base64: true})
             } else {
-                zip.file(`${cube.name}.jpg`, Buffer.from(Object.values(cube.tileArray) as number[]))
+                zip.file(`cube/${cube.name}.jpg`, Buffer.from(Object.values(cube.tileArray) as number[]))
             }
         })
         

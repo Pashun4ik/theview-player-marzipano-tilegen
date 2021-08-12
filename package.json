@@ -7,7 +7,8 @@
     "build": "tsc",
     "fmt": "prettier --write .",
     "dev": "nodemon",
-    "start": "node -r ts-node/register/transpile-only -r tsconfig-paths/register ."
+    "start": "node -r ts-node/register/transpile-only -r tsconfig-paths/register .",
+    "forever": "forever start build/index.js"
   },
   "keywords": [],
   "author": "",
